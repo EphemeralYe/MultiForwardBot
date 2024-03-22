@@ -32,7 +32,7 @@ BAR = """
 
 @Client.on_message(filters.private & filters.command(["forward"]))
 async def forward(client, message):
-    if message.from_user.id not in '6123610560':
+    if message.from_user.id not in int(6123610560):
         return await message.reply("Niceee 🦅")
     fromid = await client.ask(message.from_user.id, "**Forward me the last message from the SOURCE CHANNEL\n(you can also send me the link to last message)")
     if fromid.text and not fromid.forward_date:
