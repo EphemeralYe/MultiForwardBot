@@ -80,15 +80,8 @@ async def forward(client, message):
                 if i_file.document.file_size < 50 * 1024 * 1024:
                     under += 1
                     continue
-            elif transfer == 0:
-                fwd = client1
-            elif transfer == 1:
-                fwd = client2
-            elif transfer == 2:
-                fwd = client3
-            elif transfer == 3:
-                fwd = client4
-            await client1.send_message(message.from_user.id, "hi")
+            fwd = [client1, client2, client3, client4][transfer]
+            await fwd.send_message(message.from_user.id, "hi")
             await copy(fwd, i, from_chat) #copy files
             count += 1
             if count % 20 == 0:
