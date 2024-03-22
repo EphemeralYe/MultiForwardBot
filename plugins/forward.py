@@ -102,7 +102,7 @@ async def forward(client, message):
                 elapsed_time = time.time() - start_time
                 remaining_time = (last_msg_id - i - 1) * elapsed_time / (i - first_msg_id + 1)
                 remaining_time_str = str(datetime.timedelta(seconds=int(remaining_time)))
-                await k.edit(BAR.format(last_msg_id, i, count, last_msg_id-i-1, remaining_time_str, under, invalid_msg, skip))
+                await k.edit(BAR.format(last_msg_id, i, count, last_msg_id-i-1, remaining_time_str, under, invalid_msg, skip), reply_markup=InlineKeyboardMarkup(button))
             if transfer < 3:
                 transfer += 1
             else:
