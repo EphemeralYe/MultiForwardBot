@@ -8,7 +8,7 @@ class Bot(Client):
         self.start_time = None
         super().__init__(
             name="ForwardBot",
-            api_id=int(15499130)
+            api_id=int(15499130),
             api_hash="9a3fa3fdedff527e22d27b707475094e",
             bot_token="7174249611:AAEok-xT9hR5SwgafsyaKbRCAftpU_YWfL8",
             workers=200,
