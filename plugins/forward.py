@@ -89,7 +89,7 @@ async def forward(client, message):
                     continue
             fwd = [client1, client2, client3, client4][transfer]
             tasks = []
-            tasks.append(asyncio.create_task(copy(fwd, i, from_chat))#copy files
+            tasks.append(asyncio.create_task(copy(fwd, i, from_chat))) #copy files
             gathering += 1
             if gathering == 76:
                 asyncio.gather(*tasks)
@@ -116,7 +116,7 @@ async def forward(client, message):
                 transfer = 0
         except Exception as e:
             return await message.reply(f"{e}\n\n{i}")
-
+    return await message.reply("complete")
 
 async def copy(client, i, source):
     await client.copy_message(
