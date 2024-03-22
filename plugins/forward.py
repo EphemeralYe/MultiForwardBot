@@ -28,22 +28,35 @@ async def forward(client, message):
     except Exception as e:
         return await message.reply(e)
 
-    start_msg = await client.ask(message.from_user.id, "**Enter the ID of the starting message to copy**")
-    start_msg_id = int(start_msg.id)
+    first_msg = await client.ask(message.from_user.id, "**Enter the ID of the starting message to copy**")
+    first_msg_id = int(start_msg.id)
     
     client1, client2, client3, client4 = await initialize_clients(client, message, chat_id)
     await message.reply(f"{client1.username}\n{client2.username}\n{client3.username}\n{client4.username}")
 
+    start_time = time.time()
+
+    total_msg = last_msg_id
+    invalid_msg = 0
+    under = 0
+    skip = 0
+    transfer = 0
+        
     for i in range(first_msg_id, last_msg_id):
         try:
             i_file = await client.get_messages(from_chat.id, i)
             if not i_file.media:
-                invalid_msgs += 1
+                invalid_msg += 1
+                continue
+            elif i_file.video:
+                skip += 1
                 continue
             elif i_file.document:
                 if i_file.document.file_size < 50 * 1024 * 1024:
-                    skip += 1
+                    under += 1
                     continue
         except Exception as e:
             await message.reply(e)
-  
+
+
+await copy(client1, client2, client3, client4, i)
