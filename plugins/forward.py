@@ -81,7 +81,6 @@ async def forward(client, message):
                     under += 1
                     continue
             fwd = [client1, client2, client3, client4][transfer]
-            await fwd.send_message(message.from_user.id, "hi")
             await copy(fwd, i, from_chat) #copy files
             count += 1
             if count % 20 == 0:
@@ -108,7 +107,7 @@ async def forward(client, message):
 
 
 async def copy(client, i, source):
-    await client.copy_messages(
+    await client.copy_message(
         chat_id=DB,
         from_chat=source.id,
         message_id=i,
