@@ -105,18 +105,10 @@ async def forward(client, message):
                 remaining_time = (last_msg_id - i - 1) * elapsed_time / (i - first_msg_id + 1)
                 remaining_time_str = str(datetime.timedelta(seconds=int(remaining_time)))
                 await k.edit(BAR.format(last_msg_id, i, count, last_msg_id-i-1, remaining_time_str, under, invalid_msg, skip))
-            if transfer == 0:
+            if transfer < 3:
                 transfer += 1
-                continue 
-            elif transfer == 1:
-                transfer += 1
-                continue 
-            elif transfer == 2:
-                transfer += 1
-                continue 
-            elif transfer == 3:
-                transfer -= 3
-                continue 
+            else:
+                transfer = 0
         except Exception as e:
             return await message.reply(f"{e}\n\n{i}")
 
