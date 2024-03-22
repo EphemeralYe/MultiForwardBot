@@ -1,3 +1,7 @@
+import re
+import os
+import sys
+
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
