@@ -104,7 +104,7 @@ async def forward(client, message):
                 if i_file.document.file_size < 50 * 1024 * 1024:
                     under += 1
                     continue
-            fwd = [client1, client2, client3, client4][transfer]
+            fwd = [client1, client2, client3, client4, client5, client6, client7, client8][transfer]
             tasks = []
             tasks.append(asyncio.create_task(copy(fwd, i, from_chat))) #copy files
             gathering += 1
@@ -127,10 +127,10 @@ async def forward(client, message):
                 elapsed_time_str = str(datetime.timedelta(seconds=int(elapsed_time)))
                 await k.edit(BAR.format(last_msg_id, i, count, last_msg_id-i-1, elapsed_time_str, "Sleeping 60 sec", remaining_time_str, under, invalid_msg, skip), reply_markup=InlineKeyboardMarkup(button))
                 await asyncio.sleep(60)
-            if transfer < 3:
+            if transfer < 7:
                 transfer += 1
             else:
-                transfer = 0
+                transfer -= 7
         except Exception as e:
             return await message.reply(f"{e}\n\n{i}")
     return await message.reply("complete")
