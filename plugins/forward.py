@@ -30,10 +30,10 @@ async def forward(client, message):
 
     start_msg = await client.ask(message.from_user.id, "**Enter the ID of the starting message to copy**")
     start_msg_id = int(start_msg.id)
-    await message.reply(f"{start_msg_id}\n{last_msg_id}\n{from_chat.id}")
     
     client1, client2, client3, client4 = await initialize_client(client, message, chat_id)
-        
+    await message.reply(f"{client1.username}\n{client2.username}\n{client3.username}\n{client4.username}")
+
     for i in range(first_msg_id, last_msg_id):
         try:
             i_file = await client.get_messages(from_chat.id, i)
