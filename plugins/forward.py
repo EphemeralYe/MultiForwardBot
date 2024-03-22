@@ -108,9 +108,9 @@ async def forward(client, message):
             tasks = []
             tasks.append(asyncio.create_task(copy(fwd, i, from_chat))) #copy files
             gathering += 1
-            if gathering == 76:
+            if gathering == 120:
                 asyncio.gather(*tasks)
-                count += 76
+                count += 120
                 percentage = (i - first_msg_id + 1) / (last_msg_id - first_msg_id + 1) * 100
                 percentage_str = "{:.2f}%".format(percentage)
                 green_squares = math.floor(percentage / 10)
