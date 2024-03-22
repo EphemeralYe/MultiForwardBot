@@ -7,7 +7,7 @@ class Bot(Client):
     def __init__(self):
         self.start_time = None
         super().__init__(
-            name="ForwardBot",
+            name="Forward-Bot",
             api_id=int(15499130),
             api_hash="9a3fa3fdedff527e22d27b707475094e",
             bot_token="7174249611:AAEok-xT9hR5SwgafsyaKbRCAftpU_YWfL8",
