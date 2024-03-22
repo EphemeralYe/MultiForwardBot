@@ -102,7 +102,7 @@ async def forward(client, message):
                 elapsed_time = time.time() - start_time
                 remaining_time = (end_msg_id - i - 1) * elapsed_time / (i - start_msg_id + 1)
                 remaining_time_str = str(datetime.timedelta(seconds=int(remaining_time)))
-                await m.edit(BAR.format())
+                await k.edit(BAR.format())
             if transfer == 0:
                 transfer += 1
                 continue 
