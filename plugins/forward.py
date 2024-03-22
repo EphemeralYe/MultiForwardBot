@@ -61,7 +61,8 @@ async def forward(client, message):
     under = 0
     skip = 0
     transfer = 0
-
+    fwd = None
+    
     count = 0
     ids = []
     k = await message.reply("Starting Forwarding......")
