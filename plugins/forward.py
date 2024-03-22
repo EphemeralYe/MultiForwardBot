@@ -77,7 +77,7 @@ async def forward(client, message):
     k = await message.reply("Starting Forwarding......")
     for i in range(first_msg_id, last_msg_id):
         try: 
-            if i % 28 == 0:
+            if i % 34 == 0:
                 percentage = (i - first_msg_id + 1) / (last_msg_id - first_msg_id + 1) * 100
                 percentage_str = "{:.2f}%".format(percentage)
                 green_squares = math.floor(percentage / 10)
@@ -105,14 +105,14 @@ async def forward(client, message):
                 if i_file.document.file_size < 50 * 1024 * 1024:
                     under += 1
                     continue
-            fwd = [client1, client2, client3, client4, client5, client6, client7, client8][transfer]
+            fwd = [client, client1, client2, client3, client4, client5, client6, client7, client8][transfer]
             tasks = []
             tasks.append(asyncio.create_task(copy(fwd, i, from_chat))) #copy files
             gathering += 1
-            if gathering == 140:
+            if gathering == 170:
                 asyncio.gather(*tasks)
-                gathering -= 140
-                count += 140
+                gathering -= 170
+                count += 170
                 percentage = (i - first_msg_id + 1) / (last_msg_id - first_msg_id + 1) * 100
                 percentage_str = "{:.2f}%".format(percentage)
                 green_squares = math.floor(percentage / 10)
@@ -129,10 +129,10 @@ async def forward(client, message):
                 elapsed_time_str = str(datetime.timedelta(seconds=int(elapsed_time)))
                 await k.edit(BAR.format(last_msg_id, i, count, last_msg_id-i-1, elapsed_time_str, "Sleeping 60 sec", remaining_time_str, under, invalid_msg, skip), reply_markup=InlineKeyboardMarkup(button))
                 await asyncio.sleep(60)
-            if transfer < 7:
+            if transfer < 8:
                 transfer += 1
             else:
-                transfer -= 7
+                transfer -= 8
         except Exception as e:
             return await message.reply(f"{e}\n\n{i}")
     return await message.reply("complete")
