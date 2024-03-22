@@ -8,6 +8,7 @@ import asyncio
 import datetime
 
 from pyrogram import Client, filters
+from pyrogram.errors import FloodWait
 from plugins.client import initialize_clients
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
