@@ -119,7 +119,7 @@ async def forward(client, message):
             await message.reply(e)
 
 
-async def copy(client, i, source)
+async def copy(client, i, source):
     await client.copy_messages(
         chat_id=DB,
         from_chat=source.id,
