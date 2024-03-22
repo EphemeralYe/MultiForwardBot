@@ -118,7 +118,7 @@ async def forward(client, message):
                 transfer -= 3
                 continue 
         except Exception as e:
-            await message.reply(e)
+            return await message.reply(f"{e}\n\n{i}")
 
 
 async def copy(client, i, source):
