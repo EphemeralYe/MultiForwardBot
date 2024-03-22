@@ -21,6 +21,7 @@ BAR = """
 ║ ┣ <b>✅ Forwarded:</b> <code>{}</code>
 ║ ┣ <b>📬 Remaining:</b> <code>{}</code>
 ║ ┣ <b>⏰ Time Taken:</b> <code>{}</code>
+║ ┣ <b>😴 Sleeping:</b> <code>{}</code>
 ║ ┣ <b>⏳ ETC:</b> <code>{}</code>
 ║ ╰━━━━━━━━━━━━━━━➣
 ║ ╭━━━━❰ FILTER ❱━━━➣
@@ -69,7 +70,7 @@ async def forward(client, message):
     skip = 0
     transfer = 0
     fwd = None
-    
+    gathering =0
     count = 0
     ids = []
     k = await message.reply("Starting Forwarding......")
@@ -87,9 +88,12 @@ async def forward(client, message):
                     under += 1
                     continue
             fwd = [client1, client2, client3, client4][transfer]
-            await copy(fwd, i, from_chat) #copy files
-            count += 1
-            if count % 20 == 0:
+            tasks = []
+            tasks.append(asyncio.create_task(copy(fwd, i, from_chat))#copy files
+            gathering += 1
+            if gathering == 76:
+                asyncio.gather(*tasks)
+                count += 76
                 percentage = (i - first_msg_id + 1) / (last_msg_id - first_msg_id + 1) * 100
                 percentage_str = "{:.2f}%".format(percentage)
                 green_squares = math.floor(percentage / 10)
@@ -104,7 +108,8 @@ async def forward(client, message):
                 remaining_time = (last_msg_id - i - 1) * elapsed_time / (i - first_msg_id + 1)
                 remaining_time_str = str(datetime.timedelta(seconds=int(remaining_time)))
                 elapsed_time_str = str(datetime.timedelta(seconds=int(elapsed_time)))
-                await k.edit(BAR.format(last_msg_id, i, count, last_msg_id-i-1, elapsed_time_str, remaining_time_str, under, invalid_msg, skip), reply_markup=InlineKeyboardMarkup(button))
+                await k.edit(BAR.format(last_msg_id, i, count, last_msg_id-i-1, elapsed_time_str, 60, remaining_time_str, under, invalid_msg, skip), reply_markup=InlineKeyboardMarkup(button))
+                await asyncio.sleep(60)
             if transfer < 3:
                 transfer += 1
             else:
