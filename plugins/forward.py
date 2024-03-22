@@ -7,7 +7,7 @@ from pyrogram import Client, filters
 from plugins.client import initialize_clients
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-DB = 
+DB = int(-1001995202278)
 
 BAR = """
 ╔════❰ ғᴏʀᴡᴀʀᴅ sᴛᴀᴛᴜs  ❱═❍⊱❁۪۪
