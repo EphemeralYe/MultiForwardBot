@@ -76,7 +76,7 @@ async def forward(client, message):
     k = await message.reply("Starting Forwarding......")
     for i in range(first_msg_id, last_msg_id):
         try: 
-            if count % 40 == 0:
+            if i % 40 == 0:
                 percentage = (i - first_msg_id + 1) / (last_msg_id - first_msg_id + 1) * 100
                 percentage_str = "{:.2f}%".format(percentage)
                 green_squares = math.floor(percentage / 10)
