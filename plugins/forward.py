@@ -1,10 +1,30 @@
 import re
 import os
 import sys
+import math
 
 from pyrogram import Client, filters
 from plugins.client import initialize_clients
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+DB = 
+
+BAR = """
+╔════❰ ғᴏʀᴡᴀʀᴅ sᴛᴀᴛᴜs  ❱═❍⊱❁۪۪
+║ ╭━━━━❰ STATUS ❱━━━➣
+║ ┣ <b>♻️ Total:</b> <code>{}</code>
+║ ┣ <b>🔄 Fetched:</b> <code>{}</code>
+║ ┣ <b>✅ Forwarded:</b> <code>{}</code>
+║ ┣ <b>📬 Remaining:</b> <code>{}</code>
+║ ┣ <b>⏳ ETC:</b> <code>{}</code>
+║ ╰━━━━━━━━━━━━━━━➣
+║ ╭━━━━❰ FILTER ❱━━━➣
+║ ┣ <b>⛔️ Under 50MB:</b> <code>{}</code>
+║ ┣ <b>❌ Invalid:</b> <code>{}</code>
+║ ┣ <b>🚫 Video Skip:</b> <code>{}</code>
+║ ╰━━━━━━━━━━━━━━━➣ 
+╚════❰ ᴘʀᴏɢʀᴇssɪɴɢ ❱══❍⊱❁۪۪
+"""
 
 @Client.on_message(filters.private & filters.command(["forward"]))
 async def forward(client, message):
@@ -44,6 +64,7 @@ async def forward(client, message):
 
     count = 0
     ids = []
+    k = await message.reply("Starting Forwarding......")
     for i in range(first_msg_id, last_msg_id):
         try:
             i_file = await client.get_messages(from_chat.id, i)
@@ -57,14 +78,53 @@ async def forward(client, message):
                 if i_file.document.file_size < 50 * 1024 * 1024:
                     under += 1
                     continue
+            elif transfer == 0:
+                fwd = client1
+            elif transfer == 1:
+                fwd = client2
+            elif transfer == 2:
+                fwd = client3
+            elif transfer == 3:
+                fwd = client4
+            await copy(fwd, i, from_chat) #copy files
             count += 1
-            ids.append(i)
-            if count == 19:
-                await copy(client1, client2, client3, client4, ids, transfer)
-                
-          
+            if count % 20 == 0:
+                percentage = (i - first_msg_id + 1) / (last_msg_id - first_msg_id + 1) * 100
+                percentage_str = "{:.2f}%".format(percentage)
+                green_squares = math.floor(percentage / 10)
+                red_squares = 10 - green_squares
+                progress = "🟩{0}{1} {2}".format(
+                    ''.join(["🟩" for i in range(green_squares)]),
+                    ''.join(["🟥" for i in range(red_squares)]),
+                    percentage_str
+                )
+                button =  [[InlineKeyboardButton(progress, f'nooo')]]
+                elapsed_time = time.time() - start_time
+                remaining_time = (end_msg_id - i - 1) * elapsed_time / (i - start_msg_id + 1)
+                remaining_time_str = str(datetime.timedelta(seconds=int(remaining_time)))
+                await m.edit(BAR.format())
+            if transfer == 0:
+                transfer += 1
+                continue 
+            elif transfer == 1:
+                transfer += 1
+                continue 
+            elif transfer == 2:
+                transfer += 1
+                continue 
+            elif transfer == 3:
+                transfer -= 3
+                continue 
         except Exception as e:
             await message.reply(e)
 
 
-await copy(client1, client2, client3, client4, i, transfer)
+async def copy(client, i, source)
+    await client.copy_messages(
+        chat_id=DB,
+        from_chat=source.id,
+        message_id=i,
+        caption=" "
+    )
+       
+
