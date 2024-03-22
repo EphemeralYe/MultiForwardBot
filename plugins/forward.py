@@ -111,6 +111,7 @@ async def forward(client, message):
             gathering += 1
             if gathering == 140:
                 asyncio.gather(*tasks)
+                gathering -= 140
                 count += 140
                 percentage = (i - first_msg_id + 1) / (last_msg_id - first_msg_id + 1) * 100
                 percentage_str = "{:.2f}%".format(percentage)
