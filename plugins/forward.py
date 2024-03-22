@@ -3,7 +3,7 @@ import os
 import sys
 
 from pyrogram import Client, filters
-from plugins.client import initialize_client
+from plugins.client import initialize_clients
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 @Client.on_message(filters.private & filters.command(["forward"]))
@@ -31,7 +31,7 @@ async def forward(client, message):
     start_msg = await client.ask(message.from_user.id, "**Enter the ID of the starting message to copy**")
     start_msg_id = int(start_msg.id)
     
-    client1, client2, client3, client4 = await initialize_client(client, message, chat_id)
+    client1, client2, client3, client4 = await initialize_clients(client, message, chat_id)
     await message.reply(f"{client1.username}\n{client2.username}\n{client3.username}\n{client4.username}")
 
     for i in range(first_msg_id, last_msg_id):
