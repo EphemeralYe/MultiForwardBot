@@ -41,7 +41,9 @@ async def forward(client, message):
     under = 0
     skip = 0
     transfer = 0
-        
+
+    count = 0
+    ids = []
     for i in range(first_msg_id, last_msg_id):
         try:
             i_file = await client.get_messages(from_chat.id, i)
@@ -55,8 +57,14 @@ async def forward(client, message):
                 if i_file.document.file_size < 50 * 1024 * 1024:
                     under += 1
                     continue
+            count += 1
+            ids.append(i)
+            if count == 19:
+                await copy(client1, client2, client3, client4, ids, transfer)
+                
+          
         except Exception as e:
             await message.reply(e)
 
 
-await copy(client1, client2, client3, client4, i)
+await copy(client1, client2, client3, client4, i, transfer)
