@@ -9,7 +9,7 @@ class Bot(Client):
         super().__init__(
             name="ForwardBot",
             api_id=int(15499130),
-            api_hash="9a3fa3fdedff527e22d27b707475094e"
+            api_hash="9a3fa3fdedff527e22d27b707475094e",
             bot_token="6459124677:AAEgbekVgq44rwcAoL96rrhlhUwCbEmDKOs",
             workers=200,
             plugins={"root": "plugins"},
