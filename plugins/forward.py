@@ -21,7 +21,7 @@ BAR = """
 ║ ┣ <b>✅ Forwarded:</b> <code>{}</code>
 ║ ┣ <b>📬 Remaining:</b> <code>{}</code>
 ║ ┣ <b>⏰ Time Taken:</b> <code>{}</code>
-║ ┣ <b>😴 Sleeping:</b> <code>{}</code>
+║ ┣ <b>🧏 Status:</b> <code>{}</code>
 ║ ┣ <b>⏳ ETC:</b> <code>{}</code>
 ║ ╰━━━━━━━━━━━━━━━➣
 ║ ╭━━━━❰ FILTER ❱━━━➣
@@ -76,6 +76,23 @@ async def forward(client, message):
     k = await message.reply("Starting Forwarding......")
     for i in range(first_msg_id, last_msg_id):
         try:
+            percentage = (i - first_msg_id + 1) / (last_msg_id - first_msg_id + 1) * 100
+            percentage_str = "{:.2f}%".format(percentage)
+            green_squares = math.floor(percentage / 10)
+            red_squares = 10 - green_squares
+            progress = "🟩{0}{1} {2}".format(
+                ''.join(["🟩" for i in range(green_squares)]),
+                ''.join(["🟥" for i in range(red_squares)]),
+                percentage_str
+            )
+            button =  [[InlineKeyboardButton(progress, f'nooo')]]
+            elapsed_time = time.time() - start_time
+            remaining_time = (last_msg_id - i - 1) * elapsed_time / (i - first_msg_id + 1)
+            remaining_time_str = str(datetime.timedelta(seconds=int(remaining_time)))
+            elapsed_time_str = str(datetime.timedelta(seconds=int(elapsed_time)))
+            await k.edit(BAR.format(last_msg_id, i, count, last_msg_id-i-1, elapsed_time_str, "Forwarding", remaining_time_str, under, invalid_msg, skip), reply_markup=InlineKeyboardMarkup(button))
+
+            
             i_file = await client.get_messages(from_chat.id, i)
             if not i_file.media:
                 invalid_msg += 1
@@ -108,7 +125,7 @@ async def forward(client, message):
                 remaining_time = (last_msg_id - i - 1) * elapsed_time / (i - first_msg_id + 1)
                 remaining_time_str = str(datetime.timedelta(seconds=int(remaining_time)))
                 elapsed_time_str = str(datetime.timedelta(seconds=int(elapsed_time)))
-                await k.edit(BAR.format(last_msg_id, i, count, last_msg_id-i-1, elapsed_time_str, 60, remaining_time_str, under, invalid_msg, skip), reply_markup=InlineKeyboardMarkup(button))
+                await k.edit(BAR.format(last_msg_id, i, count, last_msg_id-i-1, elapsed_time_str, "Sleeping 60 sec", remaining_time_str, under, invalid_msg, skip), reply_markup=InlineKeyboardMarkup(button))
                 await asyncio.sleep(60)
             if transfer < 3:
                 transfer += 1
@@ -119,11 +136,14 @@ async def forward(client, message):
     return await message.reply("complete")
 
 async def copy(client, i, source):
-    await client.copy_message(
-        chat_id=DB,
-        from_chat_id=source.id,
-        message_id=i,
-        caption=" "
-    )
-       
-
+    try:
+        await client.copy_message(
+            chat_id=DB,
+            from_chat_id=source.id,
+            message_id=i,
+            caption=" "
+        )
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+        print(f"sleeping for {e.value}")
+        return await copy(client, i, source)
