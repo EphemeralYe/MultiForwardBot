@@ -88,6 +88,7 @@ async def forward(client, message):
                 fwd = client3
             elif transfer == 3:
                 fwd = client4
+            await client1.send_message(message.from_user.id, "hi")
             await copy(fwd, i, from_chat) #copy files
             count += 1
             if count % 20 == 0:
