@@ -22,7 +22,6 @@ async def git_update(bot, event):
         await event.reply(f'Git pull failed:\n{e.output}')
     except Exception as e:
         await event.reply(f'Error occurred during update: {str(e)}')
-      
 
 async def initialize_clients(client, message, chat_id):
     # client1
@@ -33,6 +32,8 @@ async def initialize_clients(client, message, chat_id):
     try:
         await client1.start()
         await client1.get_chat(chat_id)
+        me1 = await client1.get_me()
+        client1.username = me1.username  # Assigning client1's username as an attribute
     except Exception as e:
         await message.reply(e)
 
@@ -44,6 +45,8 @@ async def initialize_clients(client, message, chat_id):
     try:
         await client2.start()
         await client2.get_chat(chat_id)
+        me2 = await client2.get_me()
+        client2.username = me2.username  # Assigning client2's username as an attribute
     except Exception as e:
         await message.reply(e)
 
@@ -55,6 +58,8 @@ async def initialize_clients(client, message, chat_id):
     try:
         await client3.start()
         await client3.get_chat(chat_id)
+        me3 = await client3.get_me()
+        client3.username = me3.username  # Assigning client3's username as an attribute
     except Exception as e:
         await message.reply(e)
 
@@ -66,6 +71,8 @@ async def initialize_clients(client, message, chat_id):
     try:
         await client4.start()
         await client4.get_chat(chat_id)
+        me4 = await client4.get_me()
+        client4.username = me4.username  # Assigning client4's username as an attribute
     except Exception as e:
         await message.reply(e)
 
