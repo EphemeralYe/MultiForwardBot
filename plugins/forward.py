@@ -50,7 +50,7 @@ async def forward(client, message):
         return await message.reply(e)
 
     first_msg = await client.ask(message.from_user.id, "**Enter the ID of the starting message to copy**")
-    first_msg_id = int(first_msg.id)
+    first_msg_id = int(first_msg.text)
     
     client1, client2, client3, client4 = await initialize_clients(client, message, chat_id)
     await message.reply(f"{client1.username}\n{client2.username}\n{client3.username}\n{client4.username}")
