@@ -36,4 +36,6 @@ async def forward(client, message):
                 if i_file.document.file_size < 50 * 1024 * 1024:
                     skip += 1
                     continue
+        except Exception as e:
+            await message.reply(e)
   
