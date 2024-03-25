@@ -12,7 +12,7 @@ from pyrogram.errors import FloodWait
 from plugins.client import initialize_clients, ADMINS
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-DB = int(-1001995202278)
+DB = int(-1001996538290)
 
 BAR = """
 ╔════❰ ғᴏʀᴡᴀʀᴅ sᴛᴀᴛᴜs  ❱═❍⊱❁۪۪
