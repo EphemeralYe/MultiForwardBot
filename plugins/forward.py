@@ -9,7 +9,7 @@ import datetime
 
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
-from plugins.client import initialize_clients
+from plugins.client import initialize_clients, ADMINS
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 DB = int(-1001995202278)
@@ -35,7 +35,7 @@ BAR = """
 
 @Client.on_message(filters.private & filters.command(["forward"]))
 async def forward(client, message):
-    if message.from_user.id != (6123610560):
+    if message.from_user.id not in ADMINS:
         return await message.reply("Niceee 🦅")
     fromid = await client.ask(message.from_user.id, "**Forward me the last message from the SOURCE CHANNEL\n(you can also send me the link to last message)")
     if fromid.text and not fromid.forward_date:
