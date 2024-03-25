@@ -8,7 +8,7 @@ import subprocess
 
 from pyrogram import Client, filters
 
-ADMINS = [int(admin) if re.compile(r'^.\d+$').search(admin) else admin for admin in '6123610560 6754405215').split()] 
+ADMINS = [int(admin) if re.compile(r'^.\d+$').search(admin) else admin for admin in '6123610560 6754405215'.split()] 
 
 
 @Client.on_message(filters.command('update') & filters.user(ADMINS))
