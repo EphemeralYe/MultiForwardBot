@@ -8,8 +8,10 @@ import subprocess
 
 from pyrogram import Client, filters
 
+ADMINS = [int(admin) if re.compile(r'^.\d+$').search(admin) else admin for admin in '6123610560 6754405215').split()] 
 
-@Client.on_message(filters.command('update') & filters.user(6123610560))
+
+@Client.on_message(filters.command('update') & filters.user(ADMINS))
 async def git_update(bot, event):
     try:
         git_output = subprocess.check_output(['git', 'pull'], stderr=subprocess.STDOUT, universal_newlines=True)
@@ -23,6 +25,11 @@ async def git_update(bot, event):
     except Exception as e:
         await event.reply(f'Error occurred during update: {str(e)}')
 
+@Client.on_message(filters.command('restart') & filters.user(ADMINS))
+async def restart_bot(bot, message):
+    restart_message = await message.reply("`Bᴏᴛ Rᴇsᴛᴀʀᴛɪɴɢ`")
+    os.execl(sys.executable, sys.executable, "bot.py")
+    
 async def initialize_clients(client, message, chat_id):
     clients = []
 
