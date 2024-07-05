@@ -1,0 +1,10 @@
+#system
+pyrogram>=2.0.100
+tgcrypto
+
+#mods
+Dnspython
+pyromod==3.0.2
+
+# others
+psutil
