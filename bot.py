@@ -56,45 +56,99 @@ os.makedirs(SESSION_DIR, exist_ok=True)
 # The bot that talks to users and drives the /forward conversation.
 control_client = TelegramClient(os.path.join(SESSION_DIR, "control_bot"), API_ID, API_HASH)
 
-# Pool of clients that actually perform the copy (round-robin).
-# Reuses the same login for each entry in config["forward_sessions"].
-forward_clients = [
-    TelegramClient(os.path.join(SESSION_DIR, s["session_name"]), API_ID, API_HASH)
-    for s in config["forward_sessions"]
-]
 forward_session_cfgs = config["forward_sessions"]
 
+
+class Worker:
+    """One client in the round-robin copy pool, tracked for the dashboard."""
+
+    def __init__(self, name: str, client: TelegramClient):
+        self.name = name
+        self.client = client
+        self.status = "idle"  # idle | working | cooling | error | done
+        self.copied = 0
+        self.cooldown_until = 0.0
+
+    def refresh(self):
+        if self.status == "cooling" and time.time() >= self.cooldown_until:
+            self.status = "idle"
+
+    def cooldown_remaining(self) -> int:
+        return max(0, int(self.cooldown_until - time.time()))
+
+
+forward_workers = [
+    Worker(
+        s.get("name", f"Bot {i}"),
+        TelegramClient(os.path.join(SESSION_DIR, s["session_name"]), API_ID, API_HASH),
+    )
+    for i, s in enumerate(forward_session_cfgs, start=1)
+]
+
 job_running = False  # simple lock so only one /forward job runs at a time
+
+STATUS_ICON = {
+    "idle": "🟢",
+    "working": "🟡",
+    "cooling": "🟠",
+    "error": "🔴",
+    "done": "⚪",
+}
+
+DIVIDER = "━" * 26
 
 
 def is_allowed(user_id: int) -> bool:
     return not ALLOWED_USER_IDS or user_id in ALLOWED_USER_IDS
 
 
-def make_progress_bar(done: int, total: int) -> str:
-    percentage = (done / total * 100) if total else 0.0
-    green = math.floor(percentage / 10)
-    red = 10 - green
-    return "🟩" * green + "🟥" * red + f" {percentage:.2f}%"
-
-
 def format_td(seconds: float) -> str:
     return str(datetime.timedelta(seconds=int(max(0, seconds))))
 
 
-STATUS_TEMPLATE = (
-    "📡 Range Forward\n\n"
-    "Range     : {first} → {last}\n"
-    "Current   : {current}\n"
-    "Copied    : {copied}\n"
-    "Remaining : {remaining}\n"
-    "Elapsed   : {elapsed}\n"
-    "State     : {state}\n"
-    "ETA       : {eta}\n\n"
-    "Skipped (no media)      : {invalid}\n"
-    "Skipped (video)         : {skip}\n"
-    "Skipped (<{min_mb}MB doc) : {under}\n"
-)
+def render_dashboard(job: "ForwardJob", state: str) -> str:
+    lines = ["🚀 Range Forward Engine", "", DIVIDER, ""]
+
+    active = 0
+    for w in forward_workers:
+        w.refresh()
+        if w.status != "done":
+            active += 1
+    lines.append(f"🤖 Active Bot : {active} / {len(forward_workers)}")
+    lines.append("")
+
+    for w in forward_workers:
+        icon = STATUS_ICON.get(w.status, "⚪")
+        extra = f" (Cooling {w.cooldown_remaining()}s)" if w.status == "cooling" else ""
+        lines.append(f"{icon} {w.name} : {w.copied} copied{extra}")
+
+    lines.append("")
+    lines.append(DIVIDER)
+    lines.append("")
+
+    total = job.last_msg_id - job.first_msg_id + 1
+    processed = job.processed
+    remaining = max(0, total - processed)
+    elapsed = time.time() - job.start_time if job.start_time else 0
+    speed = (job.copied / elapsed * 60) if elapsed > 0 else 0
+    eta = (remaining / speed * 60) if speed > 0 else 0
+
+    lines.append(f"📦 Total      : {total:,}")
+    lines.append(f"📥 Processed  : {processed:,}")
+    lines.append(f"✅ Copied     : {job.copied:,}")
+    lines.append(f"📬 Remaining  : {remaining:,}")
+    lines.append("")
+    lines.append(f"⚡ Speed       : {speed:.0f} msg/min")
+    lines.append(f"⏱ Elapsed     : {format_td(elapsed)}")
+    lines.append(f"⌛ ETA         : {format_td(eta)}")
+    lines.append("")
+    lines.append(
+        f"Skipped: no-media {job.invalid_msg} · video {job.skip_video} · <{MIN_DOC_MB}MB {job.under_size}"
+    )
+    if state:
+        lines.append(f"State: {state}")
+    lines.append(DIVIDER)
+    return "\n".join(lines)
 
 
 class ForwardJob:
@@ -109,7 +163,14 @@ class ForwardJob:
         self.skip_video = 0
         self.under_size = 0
         self.copied = 0
+        self.processed = 0
         self.start_time = None
+
+        # Reset worker state for a fresh run.
+        for w in forward_workers:
+            w.status = "idle"
+            w.copied = 0
+            w.cooldown_until = 0.0
 
     @staticmethod
     def _is_video(msg) -> bool:
@@ -127,47 +188,44 @@ class ForwardJob:
             await asyncio.sleep(e.seconds)
             return await reader.get_messages(SOURCE_CHAT, ids=msg_id)
 
-    async def _copy_one(self, client: TelegramClient, msg_id: int):
+    async def _copy_one(self, worker: Worker, msg_id: int):
+        worker.status = "working"
         try:
             # drop_author=True copies without a "Forwarded from" header.
-            await client.forward_messages(DEST_CHAT, msg_id, SOURCE_CHAT, drop_author=True)
+            await worker.client.forward_messages(DEST_CHAT, msg_id, SOURCE_CHAT, drop_author=True)
+            worker.copied += 1
             self.copied += 1
+            worker.status = "idle"
         except FloodWaitError as e:
+            worker.status = "cooling"
+            worker.cooldown_until = time.time() + e.seconds
             await asyncio.sleep(e.seconds)
-            await self._copy_one(client, msg_id)
+            worker.status = "idle"
+            await self._copy_one(worker, msg_id)
         except Exception as e:
+            worker.status = "error"
             print(f"[copy failed] msg {msg_id}: {e}")
 
-    async def _update_status(self, current_id: int, total: int, state: str):
-        processed = current_id - self.first_msg_id + 1
-        remaining = max(0, self.last_msg_id - current_id)
-        elapsed = time.time() - self.start_time
-        rate = elapsed / processed if processed else 0
-        eta = remaining * rate
-        bar = make_progress_bar(processed, total)
-        text = STATUS_TEMPLATE.format(
-            first=self.first_msg_id, last=self.last_msg_id, current=current_id,
-            copied=self.copied, remaining=remaining, elapsed=format_td(elapsed),
-            state=state, eta=format_td(eta), invalid=self.invalid_msg,
-            skip=self.skip_video, under=self.under_size, min_mb=MIN_DOC_MB,
-        )
+    async def _update_status(self, state: str):
+        text = render_dashboard(self, state)
         try:
-            await self.status_msg.edit(text, buttons=[[Button.inline(bar, data=b"noop")]])
+            await self.status_msg.edit(text)
         except Exception:
             pass  # e.g. "message not modified" -- safe to ignore
 
     async def run(self):
         self.start_time = time.time()
-        total = self.last_msg_id - self.first_msg_id + 1
-        n_clients = len(forward_clients)
-        reader = forward_clients[0]
+        n_workers = len(forward_workers)
+        reader = forward_workers[0].client
 
         transfer = 0
         pending_tasks = []
 
         for i in range(self.first_msg_id, self.last_msg_id + 1):
+            self.processed += 1
+
             if i % PROGRESS_EVERY == 0:
-                await self._update_status(i, total, "Forwarding")
+                await self._update_status("Forwarding")
 
             msg = await self._get_message(reader, i)
             if msg is None or not msg.media:
@@ -182,20 +240,22 @@ class ForwardJob:
                     self.under_size += 1
                     continue
 
-            client = forward_clients[transfer]
-            pending_tasks.append(asyncio.create_task(self._copy_one(client, i)))
-            transfer = (transfer + 1) % n_clients
+            worker = forward_workers[transfer]
+            pending_tasks.append(asyncio.create_task(self._copy_one(worker, i)))
+            transfer = (transfer + 1) % n_workers
 
             if len(pending_tasks) >= BATCH_SIZE:
                 await asyncio.gather(*pending_tasks)
                 pending_tasks = []
-                await self._update_status(i, total, f"Sleeping {BATCH_SLEEP_SECONDS}s")
+                await self._update_status(f"Sleeping {BATCH_SLEEP_SECONDS}s")
                 await asyncio.sleep(BATCH_SLEEP_SECONDS)
 
         if pending_tasks:
             await asyncio.gather(*pending_tasks)
 
-        await self._update_status(self.last_msg_id, total, "Complete ✅")
+        for w in forward_workers:
+            w.status = "done"
+        await self._update_status("Complete ✅")
 
 
 @control_client.on(events.NewMessage(pattern="/start"))
@@ -255,12 +315,12 @@ async def forward_handler(event):
 async def main():
     await control_client.start(bot_token=CONTROL_BOT_TOKEN)
 
-    for client, cfg in zip(forward_clients, forward_session_cfgs):
+    for worker, cfg in zip(forward_workers, forward_session_cfgs):
         bot_token = cfg.get("bot_token")
         if bot_token:
-            await client.start(bot_token=bot_token)
+            await worker.client.start(bot_token=bot_token)
         else:
-            await client.start()  # first run prompts for phone/login code
+            await worker.client.start()  # first run prompts for phone/login code
 
     print("Bot is running. Send /forward to it on Telegram. Press Ctrl+C to stop.")
     await control_client.run_until_disconnected()
