@@ -1,16 +1,16 @@
 {
   "api_id": 31182978,
   "api_hash": "6c4c276932c0b86b4767d576dd9f5ce6",
-  "control_bot_token": "111111:AAA-control-bot-token",
-  "source_chat": "@source_channel_or_id",
-  "dest_chat": "@destination_channel_or_id",
-  "allowed_user_ids": [123456789],
+  "control_bot_token": "8944901891:AAFD2tBGBAQf8-3b77fw-wGegmoI0YfhZqM",
+  "source_chat": -1004326148552,
+  "dest_chat": -1004445175438,
+  "allowed_user_ids": [8306839005],
   "batch_size": 170,
   "batch_sleep_seconds": 60,
   "progress_update_every": 34,
   "min_document_mb": 50,
   "forward_sessions": [
-    { "name": "Bot 1", "session_name": "fwd_bot1", "bot_token": "222222:BBB-token" },
-    { "name": "Bot 2", "session_name": "fwd_bot2", "bot_token": "333333:CCC-token" }
+    { "name": "Bot 1", "session_name": "fwd_bot1", "bot_token": "8857041130:AAGFUZXdY7_kX0S8wh-Q7nW4S2hOdroumuE" },
+    { "name": "Bot 2", "session_name": "fwd_bot2", "bot_token": "8807170551:AAHjG4dq9xhivV5-cVFmSo89C67V0MdhFNU" }
   ]
 }
