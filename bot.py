@@ -4,9 +4,19 @@ Telethon control bot exposing a /forward command:
   1. User sends /forward
   2. Bot asks: "Send the start message id"
   3. Bot asks: "Send the end message id"
-  4. Bot copies messages [start..end] from SOURCE_CHAT into DEST_CHAT,
-     round-robining across a pool of forwarding clients, with a live
-     progress message (same batching/skip logic as range_copy_engine.py).
+  4. Bot copies messages [start..end] from SOURCE_CHAT into DEST_CHAT.
+
+  Dispatch model (per-worker rate limiting, queue-style advance):
+    - Each forwarding sub-client (worker) may send up to MAX_PER_WORKER
+      messages (default 16), then it goes "cooling" for
+      WORKER_COOLDOWN_SECONDS (default 60s).
+    - The main loop never blocks the whole pool: for every message it
+      asks "which sub-client is ready right now?" and hands the next
+      message to that one. Workers that are cooling are skipped until
+      their cooldown expires, at which point they rejoin the ready pool
+      automatically (checked continuously, not on a fixed global timer).
+    - This means workers advance independently, like separate queues,
+      instead of the whole pool pausing together after one shared batch.
 
 Only users listed in `allowed_user_ids` (bot_config.json) may run /forward.
 Only use this against chats you own or have explicit permission to copy
@@ -16,11 +26,10 @@ content between.
 import asyncio
 import datetime
 import json
-import math
 import os
 import time
 
-from telethon import TelegramClient, events, Button
+from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
 from telethon.tl.types import DocumentAttributeVideo
 
@@ -46,10 +55,17 @@ CONTROL_BOT_TOKEN = config["control_bot_token"]
 SOURCE_CHAT = config["source_chat"]
 DEST_CHAT = config["dest_chat"]
 ALLOWED_USER_IDS = set(config.get("allowed_user_ids", []))
-BATCH_SIZE = config.get("batch_size", 170)
-BATCH_SLEEP_SECONDS = config.get("batch_sleep_seconds", 60)
 PROGRESS_EVERY = config.get("progress_update_every", 34)
 MIN_DOC_MB = config.get("min_document_mb", 50)
+
+# --- Per-worker rate limiting (queue-style) ---
+# Each sub-client can send this many messages before it must cool down.
+MAX_PER_WORKER = config.get("messages_per_worker", 16)
+# How long (seconds) a sub-client cools down for after hitting the cap.
+WORKER_COOLDOWN_SECONDS = config.get("worker_cooldown_seconds", 60)
+# How often (seconds) the dispatcher re-checks for a ready worker when
+# the whole pool is currently cooling/working.
+POLL_INTERVAL_SECONDS = config.get("dispatch_poll_seconds", 1)
 
 os.makedirs(SESSION_DIR, exist_ok=True)
 
@@ -60,7 +76,12 @@ forward_session_cfgs = config["forward_sessions"]
 
 
 class Worker:
-    """One client in the round-robin copy pool, tracked for the dashboard."""
+    """One client in the forwarding pool, tracked for the dashboard.
+
+    Advances like its own little queue: it can send up to
+    MAX_PER_WORKER messages, then cools for WORKER_COOLDOWN_SECONDS
+    before it's eligible to receive more work.
+    """
 
     def __init__(self, name: str, client: TelegramClient):
         self.name = name
@@ -68,13 +89,20 @@ class Worker:
         self.status = "idle"  # idle | working | cooling | error | done
         self.copied = 0
         self.cooldown_until = 0.0
+        self.sent_in_window = 0  # messages sent since last cooldown reset
 
     def refresh(self):
+        """Bring a cooling worker back to idle once its cooldown has elapsed."""
         if self.status == "cooling" and time.time() >= self.cooldown_until:
             self.status = "idle"
+            self.sent_in_window = 0
 
     def cooldown_remaining(self) -> int:
         return max(0, int(self.cooldown_until - time.time()))
+
+    def is_ready(self) -> bool:
+        self.refresh()
+        return self.status == "idle"
 
 
 forward_workers = [
@@ -115,12 +143,13 @@ def render_dashboard(job: "ForwardJob", state: str) -> str:
         if w.status != "done":
             active += 1
     lines.append(f"🤖 Active Bot : {active} / {len(forward_workers)}")
+    lines.append(f"🎚 Limit/Bot  : {MAX_PER_WORKER} msgs, then {WORKER_COOLDOWN_SECONDS}s cooldown")
     lines.append("")
 
     for w in forward_workers:
         icon = STATUS_ICON.get(w.status, "⚪")
         extra = f" (Cooling {w.cooldown_remaining()}s)" if w.status == "cooling" else ""
-        lines.append(f"{icon} {w.name} : {w.copied} copied{extra}")
+        lines.append(f"{icon} {w.name} : {w.copied} copied [{w.sent_in_window}/{MAX_PER_WORKER}]{extra}")
 
     lines.append("")
     lines.append(DIVIDER)
@@ -166,11 +195,14 @@ class ForwardJob:
         self.processed = 0
         self.start_time = None
 
+        self._rr_index = 0  # round-robin cursor over forward_workers
+
         # Reset worker state for a fresh run.
         for w in forward_workers:
             w.status = "idle"
             w.copied = 0
             w.cooldown_until = 0.0
+            w.sent_in_window = 0
 
     @staticmethod
     def _is_video(msg) -> bool:
@@ -188,6 +220,27 @@ class ForwardJob:
             await asyncio.sleep(e.seconds)
             return await reader.get_messages(SOURCE_CHAT, ids=msg_id)
 
+    async def _get_ready_worker(self) -> Worker:
+        """Block (without freezing the pool) until some worker is ready,
+        cycling round-robin so load is spread evenly across whichever
+        sub-clients are currently idle."""
+        n = len(forward_workers)
+        waited = False
+        while True:
+            for _ in range(n):
+                idx = self._rr_index
+                self._rr_index = (self._rr_index + 1) % n
+                w = forward_workers[idx]
+                if w.is_ready():
+                    return w
+
+            # Nobody ready right now -- keep polling and let the dashboard
+            # reflect that we're waiting on cooldowns.
+            if not waited:
+                waited = True
+            await self._update_status("Waiting for a ready bot...")
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+
     async def _copy_one(self, worker: Worker, msg_id: int):
         worker.status = "working"
         try:
@@ -195,13 +248,23 @@ class ForwardJob:
             await worker.client.forward_messages(DEST_CHAT, msg_id, SOURCE_CHAT, drop_author=True)
             worker.copied += 1
             self.copied += 1
-            worker.status = "idle"
+            worker.sent_in_window += 1
+
+            if worker.sent_in_window >= MAX_PER_WORKER:
+                # Hit its cap for this window -- cool down before it can
+                # be picked again, regardless of how fast it's going.
+                worker.status = "cooling"
+                worker.cooldown_until = time.time() + WORKER_COOLDOWN_SECONDS
+                worker.sent_in_window = 0
+            else:
+                worker.status = "idle"
         except FloodWaitError as e:
             worker.status = "cooling"
             worker.cooldown_until = time.time() + e.seconds
+            worker.sent_in_window = 0
             await asyncio.sleep(e.seconds)
             worker.status = "idle"
-            await self._copy_one(worker, msg_id)
+            await self._copy_one(worker, msg_id)  # retry the same message
         except Exception as e:
             worker.status = "error"
             print(f"[copy failed] msg {msg_id}: {e}")
@@ -215,10 +278,8 @@ class ForwardJob:
 
     async def run(self):
         self.start_time = time.time()
-        n_workers = len(forward_workers)
         reader = forward_workers[0].client
 
-        transfer = 0
         pending_tasks = []
 
         for i in range(self.first_msg_id, self.last_msg_id + 1):
@@ -240,15 +301,15 @@ class ForwardJob:
                     self.under_size += 1
                     continue
 
-            worker = forward_workers[transfer]
-            pending_tasks.append(asyncio.create_task(self._copy_one(worker, i)))
-            transfer = (transfer + 1) % n_workers
+            # Advance queue-style: wait for whichever sub-client is next
+            # ready (idle), hand it this message, then move on immediately
+            # -- other workers keep advancing on their own schedules.
+            worker = await self._get_ready_worker()
+            task = asyncio.create_task(self._copy_one(worker, i))
+            pending_tasks.append(task)
 
-            if len(pending_tasks) >= BATCH_SIZE:
-                await asyncio.gather(*pending_tasks)
-                pending_tasks = []
-                await self._update_status(f"Sleeping {BATCH_SLEEP_SECONDS}s")
-                await asyncio.sleep(BATCH_SLEEP_SECONDS)
+            # Keep the pending list from growing unbounded on long runs.
+            pending_tasks = [t for t in pending_tasks if not t.done()]
 
         if pending_tasks:
             await asyncio.gather(*pending_tasks)
