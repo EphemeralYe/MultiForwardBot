@@ -4,7 +4,9 @@ Telethon control bot exposing a /forward command:
   1. User sends /forward
   2. Bot asks: "Send the start message id"
   3. Bot asks: "Send the end message id"
-  4. Bot copies messages [start..end] from SOURCE_CHAT into DEST_CHAT.
+  4. Bot copies messages [start..end] from SOURCE_CHAT into DEST_CHAT,
+     with a live dashboard that includes interactive control buttons:
+       ⏸ Pause / ▶️ Resume, ⏹ Cancel (with a confirm step), 🔄 Refresh.
 
   Dispatch model (per-worker rate limiting, queue-style advance):
     - Each forwarding sub-client (worker) may send up to MAX_PER_WORKER
@@ -29,7 +31,7 @@ import json
 import os
 import time
 
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, Button
 from telethon.errors import FloodWaitError
 from telethon.tl.types import DocumentAttributeVideo
 
@@ -59,29 +61,19 @@ PROGRESS_EVERY = config.get("progress_update_every", 34)
 MIN_DOC_MB = config.get("min_document_mb", 50)
 
 # --- Per-worker rate limiting (queue-style) ---
-# Each sub-client can send this many messages before it must cool down.
 MAX_PER_WORKER = config.get("messages_per_worker", 16)
-# How long (seconds) a sub-client cools down for after hitting the cap.
 WORKER_COOLDOWN_SECONDS = config.get("worker_cooldown_seconds", 60)
-# How often (seconds) the dispatcher re-checks for a ready worker when
-# the whole pool is currently cooling/working.
 POLL_INTERVAL_SECONDS = config.get("dispatch_poll_seconds", 1)
 
 os.makedirs(SESSION_DIR, exist_ok=True)
 
-# The bot that talks to users and drives the /forward conversation.
 control_client = TelegramClient(os.path.join(SESSION_DIR, "control_bot"), API_ID, API_HASH)
 
 forward_session_cfgs = config["forward_sessions"]
 
 
 class Worker:
-    """One client in the forwarding pool, tracked for the dashboard.
-
-    Advances like its own little queue: it can send up to
-    MAX_PER_WORKER messages, then cools for WORKER_COOLDOWN_SECONDS
-    before it's eligible to receive more work.
-    """
+    """One client in the forwarding pool, tracked for the dashboard."""
 
     def __init__(self, name: str, client: TelegramClient):
         self.name = name
@@ -89,10 +81,10 @@ class Worker:
         self.status = "idle"  # idle | working | cooling | error | done
         self.copied = 0
         self.cooldown_until = 0.0
-        self.sent_in_window = 0  # messages sent since last cooldown reset
+        self.sent_in_window = 0
+        self.last_error = None
 
     def refresh(self):
-        """Bring a cooling worker back to idle once its cooldown has elapsed."""
         if self.status == "cooling" and time.time() >= self.cooldown_until:
             self.status = "idle"
             self.sent_in_window = 0
@@ -113,7 +105,8 @@ forward_workers = [
     for i, s in enumerate(forward_session_cfgs, start=1)
 ]
 
-job_running = False  # simple lock so only one /forward job runs at a time
+job_running = False
+current_job = None  # the ForwardJob currently in flight, for button callbacks
 
 STATUS_ICON = {
     "idle": "🟢",
@@ -134,6 +127,18 @@ def format_td(seconds: float) -> str:
     return str(datetime.timedelta(seconds=int(max(0, seconds))))
 
 
+def progress_bar(fraction: float, width: int = 18) -> str:
+    fraction = max(0.0, min(1.0, fraction))
+    filled = round(width * fraction)
+    return "▓" * filled + "░" * (width - filled)
+
+
+def mini_bar(value: int, total: int, width: int = 8) -> str:
+    if total <= 0:
+        return "░" * width
+    return progress_bar(value / total, width)
+
+
 def render_dashboard(job: "ForwardJob", state: str) -> str:
     lines = ["🚀 Range Forward Engine", "", DIVIDER, ""]
 
@@ -148,8 +153,10 @@ def render_dashboard(job: "ForwardJob", state: str) -> str:
 
     for w in forward_workers:
         icon = STATUS_ICON.get(w.status, "⚪")
-        extra = f" (Cooling {w.cooldown_remaining()}s)" if w.status == "cooling" else ""
-        lines.append(f"{icon} {w.name} : {w.copied} copied [{w.sent_in_window}/{MAX_PER_WORKER}]{extra}")
+        bar = mini_bar(w.sent_in_window, MAX_PER_WORKER)
+        extra = f" (cooling {w.cooldown_remaining()}s)" if w.status == "cooling" else ""
+        err = f" ⚠️ {w.last_error}" if w.last_error else ""
+        lines.append(f"{icon} {w.name} [{bar}] {w.copied} copied{extra}{err}")
 
     lines.append("")
     lines.append(DIVIDER)
@@ -161,7 +168,10 @@ def render_dashboard(job: "ForwardJob", state: str) -> str:
     elapsed = time.time() - job.start_time if job.start_time else 0
     speed = (job.copied / elapsed * 60) if elapsed > 0 else 0
     eta = (remaining / speed * 60) if speed > 0 else 0
+    pct = (processed / total * 100) if total > 0 else 0
 
+    lines.append(f"{progress_bar(processed / total if total else 0)}  {pct:5.1f}%")
+    lines.append("")
     lines.append(f"📦 Total      : {total:,}")
     lines.append(f"📥 Processed  : {processed:,}")
     lines.append(f"✅ Copied     : {job.copied:,}")
@@ -174,8 +184,11 @@ def render_dashboard(job: "ForwardJob", state: str) -> str:
     lines.append(
         f"Skipped: no-media {job.invalid_msg} · video {job.skip_video} · <{MIN_DOC_MB}MB {job.under_size}"
     )
+    if job.retry_count:
+        lines.append(f"🔁 Flood-wait retries: {job.retry_count}")
     if state:
-        lines.append(f"State: {state}")
+        tag = "⏸ PAUSED" if job.paused and state not in ("done", "cancelled") else state
+        lines.append(f"State: {tag}")
     lines.append(DIVIDER)
     return "\n".join(lines)
 
@@ -193,16 +206,22 @@ class ForwardJob:
         self.under_size = 0
         self.copied = 0
         self.processed = 0
+        self.retry_count = 0
         self.start_time = None
 
-        self._rr_index = 0  # round-robin cursor over forward_workers
+        self.state = "starting"
+        self.paused = False
+        self.cancel_requested = False
+        self.awaiting_cancel_confirm = False
 
-        # Reset worker state for a fresh run.
+        self._rr_index = 0
+
         for w in forward_workers:
             w.status = "idle"
             w.copied = 0
             w.cooldown_until = 0.0
             w.sent_in_window = 0
+            w.last_error = None
 
     @staticmethod
     def _is_video(msg) -> bool:
@@ -217,16 +236,49 @@ class ForwardJob:
         try:
             return await reader.get_messages(SOURCE_CHAT, ids=msg_id)
         except FloodWaitError as e:
+            self.retry_count += 1
             await asyncio.sleep(e.seconds)
             return await reader.get_messages(SOURCE_CHAT, ids=msg_id)
 
-    async def _get_ready_worker(self) -> Worker:
-        """Block (without freezing the pool) until some worker is ready,
-        cycling round-robin so load is spread evenly across whichever
-        sub-clients are currently idle."""
+    def _buttons(self):
+        if self.state in ("done", "cancelled"):
+            return None
+        if self.awaiting_cancel_confirm:
+            return [[Button.inline("✅ Yes, cancel", b"cancel_yes"),
+                     Button.inline("↩️ No, keep going", b"cancel_no")]]
+        top = []
+        if self.paused:
+            top.append(Button.inline("▶️ Resume", b"resume"))
+        else:
+            top.append(Button.inline("⏸ Pause", b"pause"))
+        top.append(Button.inline("⏹ Cancel", b"cancel_ask"))
+        bottom = [Button.inline("🔄 Refresh", b"refresh")]
+        return [top, bottom]
+
+    async def _update_status(self, state: str):
+        self.state = state
+        text = render_dashboard(self, state)
+        try:
+            await self.status_msg.edit(text, buttons=self._buttons())
+        except Exception:
+            pass  # e.g. "message not modified" -- safe to ignore
+
+    async def _wait_while_paused(self):
+        while self.paused and not self.cancel_requested:
+            await self._update_status("⏸ Paused")
+            await asyncio.sleep(1)
+
+    async def _get_ready_worker(self):
+        """Returns the next ready worker, or None if the job was cancelled
+        while waiting."""
         n = len(forward_workers)
-        waited = False
         while True:
+            if self.cancel_requested:
+                return None
+            await self._wait_while_paused()
+            if self.cancel_requested:
+                return None
+
             for _ in range(n):
                 idx = self._rr_index
                 self._rr_index = (self._rr_index + 1) % n
@@ -234,47 +286,37 @@ class ForwardJob:
                 if w.is_ready():
                     return w
 
-            # Nobody ready right now -- keep polling and let the dashboard
-            # reflect that we're waiting on cooldowns.
-            if not waited:
-                waited = True
             await self._update_status("Waiting for a ready bot...")
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
     async def _copy_one(self, worker: Worker, msg_id: int):
         worker.status = "working"
         try:
-            # drop_author=True copies without a "Forwarded from" header.
             await worker.client.forward_messages(DEST_CHAT, msg_id, SOURCE_CHAT, drop_author=True)
             worker.copied += 1
             self.copied += 1
             worker.sent_in_window += 1
+            worker.last_error = None
 
             if worker.sent_in_window >= MAX_PER_WORKER:
-                # Hit its cap for this window -- cool down before it can
-                # be picked again, regardless of how fast it's going.
                 worker.status = "cooling"
                 worker.cooldown_until = time.time() + WORKER_COOLDOWN_SECONDS
                 worker.sent_in_window = 0
             else:
                 worker.status = "idle"
         except FloodWaitError as e:
+            self.retry_count += 1
             worker.status = "cooling"
             worker.cooldown_until = time.time() + e.seconds
             worker.sent_in_window = 0
+            worker.last_error = f"flood-wait {e.seconds}s"
             await asyncio.sleep(e.seconds)
             worker.status = "idle"
-            await self._copy_one(worker, msg_id)  # retry the same message
+            await self._copy_one(worker, msg_id)
         except Exception as e:
             worker.status = "error"
+            worker.last_error = str(e)[:60]
             print(f"[copy failed] msg {msg_id}: {e}")
-
-    async def _update_status(self, state: str):
-        text = render_dashboard(self, state)
-        try:
-            await self.status_msg.edit(text)
-        except Exception:
-            pass  # e.g. "message not modified" -- safe to ignore
 
     async def run(self):
         self.start_time = time.time()
@@ -283,6 +325,13 @@ class ForwardJob:
         pending_tasks = []
 
         for i in range(self.first_msg_id, self.last_msg_id + 1):
+            if self.cancel_requested:
+                break
+
+            await self._wait_while_paused()
+            if self.cancel_requested:
+                break
+
             self.processed += 1
 
             if i % PROGRESS_EVERY == 0:
@@ -301,14 +350,12 @@ class ForwardJob:
                     self.under_size += 1
                     continue
 
-            # Advance queue-style: wait for whichever sub-client is next
-            # ready (idle), hand it this message, then move on immediately
-            # -- other workers keep advancing on their own schedules.
             worker = await self._get_ready_worker()
+            if worker is None:
+                break
+
             task = asyncio.create_task(self._copy_one(worker, i))
             pending_tasks.append(task)
-
-            # Keep the pending list from growing unbounded on long runs.
             pending_tasks = [t for t in pending_tasks if not t.done()]
 
         if pending_tasks:
@@ -316,7 +363,11 @@ class ForwardJob:
 
         for w in forward_workers:
             w.status = "done"
-        await self._update_status("Complete ✅")
+
+        if self.cancel_requested:
+            await self._update_status("cancelled")
+        else:
+            await self._update_status("done")
 
 
 @control_client.on(events.NewMessage(pattern="/start"))
@@ -329,7 +380,7 @@ async def start_handler(event):
 
 @control_client.on(events.NewMessage(pattern="/forward"))
 async def forward_handler(event):
-    global job_running
+    global job_running, current_job
 
     if not is_allowed(event.sender_id):
         await event.respond("🚫 You're not allowed to use this command.")
@@ -366,11 +417,61 @@ async def forward_handler(event):
     job_running = True
     try:
         job = ForwardJob(first_msg_id, last_msg_id, status_msg)
+        current_job = job
         await job.run()
     except Exception as e:
         await status_msg.reply(f"❌ Job stopped with an error: {e}")
     finally:
         job_running = False
+        current_job = None
+
+
+@control_client.on(events.CallbackQuery)
+async def callback_handler(event):
+    if not is_allowed(event.sender_id):
+        await event.answer("🚫 You're not allowed to control this job.", alert=True)
+        return
+
+    job = current_job
+    if job is None:
+        await event.answer("No active job right now.", alert=True)
+        return
+
+    data = event.data
+
+    if data == b"pause":
+        job.paused = True
+        await event.answer("Paused")
+        await job._update_status(job.state)
+
+    elif data == b"resume":
+        job.paused = False
+        await event.answer("Resumed")
+        await job._update_status("Forwarding")
+
+    elif data == b"cancel_ask":
+        job.awaiting_cancel_confirm = True
+        await event.answer()
+        await job._update_status(job.state)
+
+    elif data == b"cancel_yes":
+        job.awaiting_cancel_confirm = False
+        job.cancel_requested = True
+        job.paused = False
+        await event.answer("Cancelling job...")
+        await job._update_status("cancelling")
+
+    elif data == b"cancel_no":
+        job.awaiting_cancel_confirm = False
+        await event.answer("Keeping the job running.")
+        await job._update_status(job.state)
+
+    elif data == b"refresh":
+        await event.answer("Refreshed")
+        await job._update_status(job.state)
+
+    else:
+        await event.answer()
 
 
 async def main():
