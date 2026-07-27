@@ -10,7 +10,7 @@
   "worker_cooldown_seconds": 60,
   "dispatch_poll_seconds": 1,
 
-  "progress_update_every": 10,
+  "progress_update_every": 34,
   "min_document_mb": 50,
 
   "forward_sessions": [
