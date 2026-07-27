@@ -5,10 +5,14 @@
   "source_chat": -1004326148552,
   "dest_chat": -1004445175438,
   "allowed_user_ids": [8306839005],
-  "batch_size": 170,
-  "batch_sleep_seconds": 60,
+
+  "messages_per_worker": 16,
+  "worker_cooldown_seconds": 60,
+  "dispatch_poll_seconds": 1,
+
   "progress_update_every": 34,
   "min_document_mb": 50,
+
   "forward_sessions": [
     { "name": "Bot 1", "session_name": "fwd_bot1", "bot_token": "8857041130:AAGFUZXdY7_kX0S8wh-Q7nW4S2hOdroumuE" },
     { "name": "Bot 2", "session_name": "fwd_bot2", "bot_token": "8807170551:AAHjG4dq9xhivV5-cVFmSo89C67V0MdhFNU" }
