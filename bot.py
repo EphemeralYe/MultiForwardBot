@@ -132,9 +132,6 @@ STATUS_ICON = {
     "done": "⚪",
 }
 
-DIVIDER = "━" * 26
-
-
 def is_allowed(user_id: int) -> bool:
     return not ALLOWED_USER_IDS or user_id in ALLOWED_USER_IDS
 
@@ -156,29 +153,6 @@ def mini_bar(value: int, total: int, width: int = 8) -> str:
 
 
 def render_dashboard(job: "ForwardJob", state: str) -> str:
-    lines = ["🚀 Range Forward Engine", "", DIVIDER, ""]
-
-    active = 0
-    for w in forward_workers:
-        w.refresh()
-        if w.status != "done":
-            active += 1
-    lines.append(f"🤖 Active Bot : {active} / {len(forward_workers)}")
-    lines.append(f"🎚 Limit/Bot  : {MAX_PER_WORKER} msgs/batch, then {WORKER_COOLDOWN_SECONDS}s cooldown")
-    lines.append(f"📡 Fetch chunk: {FETCH_CHUNK_SIZE} ids/call")
-    lines.append("")
-
-    for w in forward_workers:
-        icon = STATUS_ICON.get(w.status, "⚪")
-        bar = mini_bar(w.sent_in_window, MAX_PER_WORKER)
-        extra = f" (cooling {w.cooldown_remaining()}s)" if w.status == "cooling" else ""
-        err = f" ⚠️ {w.last_error}" if w.last_error else ""
-        lines.append(f"{icon} {w.name} [{bar}] {w.copied} copied{extra}{err}")
-
-    lines.append("")
-    lines.append(DIVIDER)
-    lines.append("")
-
     total = job.last_msg_id - job.first_msg_id + 1
     processed = job.processed
     remaining = max(0, total - processed)
@@ -186,29 +160,52 @@ def render_dashboard(job: "ForwardJob", state: str) -> str:
     speed = (job.copied / elapsed * 60) if elapsed > 0 else 0
     eta = (remaining / speed * 60) if speed > 0 else 0
     pct = (processed / total * 100) if total > 0 else 0
+    finished = state in ("done", "cancelled")
 
-    lines.append(f"{progress_bar(processed / total if total else 0)}  {pct:5.1f}%")
+    tag = "⏸ Paused" if job.paused and not finished else {
+        "done": "✅ Complete", "cancelled": "⏹ Cancelled",
+    }.get(state, state or "Forwarding")
+
+    lines = [f"🚀 FORWARD JOB — {tag}", ""]
+
+    # --- Progress ---
+    lines.append(f"{progress_bar(processed / total if total else 0)}  {pct:4.1f}%")
+    lines.append(f"{processed:,} / {total:,} processed  ·  ✅ {job.copied:,} copied")
     lines.append("")
-    lines.append(f"📦 Total      : {total:,}")
-    lines.append(f"📥 Processed  : {processed:,}")
-    lines.append(f"✅ Copied     : {job.copied:,}")
-    lines.append(f"📬 Remaining  : {remaining:,}")
-    lines.append(f"🌐 API calls  : ~{job.fetch_calls:,} fetch · {job.forward_calls:,} forward")
+
+    # --- Pace (skip once the job is finished, no longer meaningful) ---
+    if not finished:
+        lines.append(f"⚡ {speed:.0f}/min   ⏱ {format_td(elapsed)} elapsed   ⌛ ETA {format_td(eta)}")
+        lines.append("")
+
+    # --- Workers ---
+    lines.append("WORKERS")
+    for w in forward_workers:
+        icon = STATUS_ICON.get(w.status, "⚪")
+        if w.status == "cooling":
+            right = f"cooling {w.cooldown_remaining()}s"
+        else:
+            right = mini_bar(w.sent_in_window, MAX_PER_WORKER) + f" {w.sent_in_window}/{MAX_PER_WORKER}"
+        err = f"  ⚠️ {w.last_error}" if w.last_error else ""
+        lines.append(f"{icon} {w.name:<8} {right}   {w.copied:,} sent{err}")
     lines.append("")
-    lines.append(f"⚡ Speed       : {speed:.0f} msg/min")
-    lines.append(f"⏱ Elapsed     : {format_td(elapsed)}")
-    lines.append(f"⌛ ETA         : {format_td(eta)}")
-    lines.append("")
-    lines.append(
-        f"Skipped: no-media {job.invalid_msg} · video {job.skip_video} · <{MIN_DOC_MB}MB {job.under_size}"
-    )
+
+    # --- Only show these lines when there's actually something to report ---
+    notes = []
+    if job.invalid_msg or job.skip_video or job.under_size:
+        notes.append(
+            f"⏭ Skipped: no-media {job.invalid_msg} · video {job.skip_video} · <{MIN_DOC_MB}MB {job.under_size}"
+        )
     if job.retry_count:
-        lines.append(f"🔁 Flood-wait retries: {job.retry_count}")
-    if state:
-        tag = "⏸ PAUSED" if job.paused and state not in ("done", "cancelled") else state
-        lines.append(f"State: {tag}")
-    lines.append(DIVIDER)
-    return "\n".join(lines)
+        notes.append(f"🔁 Flood-wait retries: {job.retry_count}")
+    if notes:
+        lines.extend(notes)
+        lines.append("")
+
+    if finished:
+        lines.append(f"🌐 {job.fetch_calls:,} read calls · {job.forward_calls:,} send calls total")
+
+    return "\n".join(lines).rstrip()
 
 
 class ForwardJob:
@@ -466,8 +463,11 @@ async def forward_handler(event):
             await conv.send_message("❌ End id must be greater than or equal to start id.")
             return
 
+        total_msgs = last_msg_id - first_msg_id + 1
         status_msg = await conv.send_message(
-            f"Starting forward job for messages {first_msg_id} → {last_msg_id}..."
+            f"Starting forward job: {first_msg_id} → {last_msg_id} ({total_msgs:,} messages)\n"
+            f"Pool: {len(forward_workers)} bots · {MAX_PER_WORKER} msgs/batch · "
+            f"{WORKER_COOLDOWN_SECONDS}s cooldown · {FETCH_CHUNK_SIZE} ids/read"
         )
 
     job_running = True
